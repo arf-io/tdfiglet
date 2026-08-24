@@ -1,7 +1,9 @@
 PROG := tdfiglet
 SRC := tdfiglet.c
 PREFIX ?= /usr/local
-FONTS := fonts/*
+# unused-fonts/ are the block and outline fonts the colour-only parser used
+# to reject.  They render now, so they install alongside the rest.
+FONTS := fonts/* unused-fonts/*
 FONTDIR := $(PREFIX)/share/$(PROG)/fonts
 CC ?= cc
 CFLAGS += -DFONT_DIR=\"$(FONTDIR)\" -std=c99 -Wall
