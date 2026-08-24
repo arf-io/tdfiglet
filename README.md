@@ -6,7 +6,8 @@ Because your figlet ascii sucks.
 
 1198 TheDraw font files are included, holding **3711 fonts** between them — a
 `.tdf` file is a chain of sub-fonts, not a single font. All three TheDraw font
-types render: colour, block, and outline.
+types render: colour, block, and outline. Descenders render too, so the tail of
+a `Q` and the hook of a `g` are no longer clipped.
 
 ## Installation
 
