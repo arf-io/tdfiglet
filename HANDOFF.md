@@ -214,11 +214,45 @@ profiles as code, animated output in any format, PNG/HEIF/H.264/H.265/AV1/VP8,
 the `tdfx` editing tool, FIGlet import, shaders and 3D. `docs/TDFUTURE.md` §14
 carries the same list and is the authoritative copy.
 
-## Not done: wiki and Asana
+## Published artefacts
 
-Global directives require wiki documentation and Asana tracking for work of
-this scope. Neither was reachable/attempted in this session. This is an open
-item, not a completed one.
+| What | Where |
+|---|---|
+| ARF fork (public) | <https://github.com/arf-io/tdfiglet> |
+| Upstream PR | <https://github.com/tat3r/tdfiglet/pull/11> (OPEN) |
+| Wiki page | <https://wiki.arf.io/en/systems-operations/tdfiglet-tdf-font-format> (id 169) |
+| Asana task | <https://app.asana.com/1/1198722117693833/project/1216773945225390/task/1217803407727482> (ARF · Now) |
+
+### Branch layout
+
+- `feature/classic-tdf-full-support` — full history, includes `HANDOFF.md`.
+  Pushed to the fork.
+- `pr/tdf-full-format-support` — the same three commits with `HANDOFF.md` and
+  `.forgejo/workflows/ci.yml` stripped. This is what upstream sees. If you
+  add commits to the feature branch, rebuild the PR branch the same way
+  (cherry-pick `-n`, `git rm --cached` the two files, `git commit -C`).
+
+### Fork/push gotchas
+
+- The `arf-io` GitHub org is reachable only through the **`damienheiser`** `gh`
+  account, not `h-e-d-o-n`. `gh auth switch --user damienheiser` first.
+  The session left the active account restored to `h-e-d-o-n`.
+- The `github-damienheiser` SSH host alias **does not authenticate** to GitHub
+  (`Permission denied (publickey)`) — the key at
+  `~/.ssh/cleanthisshitup/github-damienheiser-at-honkin-chonker-...` is not
+  registered. Push over **HTTPS** using the `gh` credential helper instead;
+  remote `arf-fork` is set to `https://github.com/arf-io/tdfiglet.git`.
+- Wiki.js search: the `search { query(...) }` GraphQL shape in the `wiki-doc`
+  skill is **rejected** by this instance. Use
+  `{ pages { list(orderBy: PATH) { id path title } } }` and filter client-side.
+
+### A trap worth not repeating
+
+`.forgejo/workflows/ci.yml` was staged in the index before this session began.
+Committing without an explicit pathspec swept it into two of my commits. Both
+were rewritten to remove it, and the file was left staged-but-uncommitted, as
+it was found. **Always pass explicit paths to `git commit` in this repo** while
+that file sits in the index.
 
 ## Pointers
 
