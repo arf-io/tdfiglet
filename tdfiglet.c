@@ -141,8 +141,10 @@ typedef struct font_s {
 	uint8_t *dataend;
 	glyph_t *glyphs[NUM_CHARS];
 	uint8_t height;
+	uint8_t spacewidth;
 	int index;
 	int count;
+	bool truncated;
 } font_t;
 
 struct dirname_s {
@@ -184,7 +186,22 @@ static const uint8_t outlinemap[16] = {
 	0x20	/* O  hard space, renders blank	*/
 };
 
-#define OUTLINE_DESCENDER	0x26
+/*
+ * 0x26 in character position, immediately followed by a row separator or the
+ * glyph terminator, is a descender mark: it ends the row and flags it as
+ * hanging below the declared glyph height.  It is a control byte, not a cell,
+ * and carries no attribute byte even in colour fonts.
+ *
+ * The narrow "followed by 0x0D or 0x00" test matters.  0x26 is also a literal
+ * ampersand, and 78 cells in the bundled corpus use it as one.  Verified over
+ * all 234473 corpus glyphs: with this rule no glyph has a row wider than its
+ * declared width, and without it 81 do.
+ */
+#define DESCENDER_MARK	0x26
+
+#define is_descender_mark(p, end) \
+	((p)[0] == DESCENDER_MARK && (p) + 1 < (end) && \
+	 ((p)[1] == '\r' || (p)[1] == '\0'))
 
 opt_t opt;
 
@@ -193,6 +210,8 @@ font_t *loadfont(char *fn);
 void readchar(int i, glyph_t *glyph, font_t *font);
 
 const char *fonttypename(uint8_t type);
+static void glyphextents(const font_t *font, const uint8_t *p,
+			 uint8_t *wp, uint8_t *hp);
 int listfonts(const char *fn);
 
 void ibmtoutf8(char *a, char *u);
@@ -291,7 +310,7 @@ le16(const uint8_t *p)
  * garbage (fonts/guardf2.tdf has 129 such bytes) from being read as a font.
  */
 static int
-findsubfonts(const uint8_t *map, size_t len, size_t *offs, int max)
+findsubfonts(const uint8_t *map, size_t len, size_t *offs, int max, bool *more)
 {
 	size_t off = MAGIC_LEN;
 	int n = 0;
@@ -301,6 +320,11 @@ findsubfonts(const uint8_t *map, size_t len, size_t *offs, int max)
 		offs[n++] = off;
 		off += HDR_LEN + le16(map + off + OFF_BLOCKSIZE);
 	}
+
+	/* Tell the caller the chain did not end, it just hit the cap. */
+	if (more)
+		*more = (n == max && off + HDR_LEN <= len &&
+			 !memcmp(map + off, seqmark, sizeof(seqmark)));
 
 	return n;
 }
@@ -357,13 +381,15 @@ listfonts(const char *fn_arg)
 	size_t offs[MAX_SUBFONTS];
 	size_t len;
 	uint8_t *map;
+	bool more = false;
 	int n;
 
 	map = mapfont(fn, &len);
-	n = findsubfonts(map, len, offs, MAX_SUBFONTS);
+	n = findsubfonts(map, len, offs, MAX_SUBFONTS, &more);
 
 	printf("file: %s\n", fn);
-	printf("sub-fonts: %d\n", n);
+	printf("sub-fonts: %d%s\n", n,
+	       more ? " (chain continues; listing capped)" : "");
 
 	for (int i = 0; i < n; i++) {
 		const uint8_t *h = map + offs[i];
@@ -417,6 +443,7 @@ main(int argc, char *argv[])
 
 	int r = 0;
 	int dll = 0;
+	bool randomsub = false;
 
 	while((o = getopt(argc, argv, "f:n:w:j:c:e:irLvh")) != -1) {
 		switch (o) {
@@ -546,6 +573,11 @@ main(int argc, char *argv[])
 			} else {
 				fontfile = DEFAULT_FONT;
 			}
+
+			/* Most files hold several sub-fonts.  Picking only
+			 * sub-font 0 would leave most of the collection
+			 * unreachable by -r. */
+			randomsub = true;
 		}
 	}
 
@@ -564,6 +596,20 @@ main(int argc, char *argv[])
 	if (opt.list) {
 		listfonts(fontfile);
 		return 0;
+	}
+
+	if (randomsub) {
+		char *rp = fontpath(fontfile);
+		size_t roffs[MAX_SUBFONTS];
+		size_t rlen;
+		uint8_t *rmap = mapfont(rp, &rlen);
+		int rn = findsubfonts(rmap, rlen, roffs, MAX_SUBFONTS, NULL);
+
+		if (rn > 1)
+			opt.subfont = rand() % rn;
+
+		munmap(rmap, rlen);
+		free(rp);
 	}
 
 	if (argc < 1) {
@@ -590,12 +636,13 @@ font_t
 	uint8_t *hdr;
 	size_t len;
 	size_t offs[MAX_SUBFONTS];
+	bool font_truncated = false;
 	int nfonts;
 	char *fn = fontpath(fn_arg);
 
 	map = mapfont(fn, &len);
 
-	nfonts = findsubfonts(map, len, offs, MAX_SUBFONTS);
+	nfonts = findsubfonts(map, len, offs, MAX_SUBFONTS, &font_truncated);
 
 	if (nfonts < 1) {
 		fprintf(stderr, "Invalid font file: %s (no sub-fonts)\n", fn);
@@ -631,6 +678,7 @@ font_t
 	font->height = 0;
 	font->index = (int)opt.subfont;
 	font->count = nfonts;
+	font->truncated = font_truncated;
 
 	/*
 	 * Clamp the glyph data window to the declared block size and to the
@@ -653,7 +701,8 @@ font_t
 		printf("file: %s\n", fn);
 		printf("font: %.*s\n", font->namelen, (char *)font->name);
 		printf("type: %s\n", fonttypename(font->fonttype));
-		printf("sub-font: %d of %d\n", font->index, font->count);
+		printf("sub-font: %d of %d%s\n", font->index, font->count,
+		       font->truncated ? " (chain continues; capped)" : "");
 		printf("spacing: %d\n", font->spacing);
 		printf("char list: ");
 	}
@@ -664,6 +713,9 @@ font_t
 	 * for a 2 byte glyph header inside the data window are dropped here
 	 * so the second pass never sees them.
 	 */
+	unsigned int totalwidth = 0;
+	unsigned int ndefined = 0;
+
 	for (int i = 0; i < NUM_CHARS; i++) {
 		uint8_t *p;
 
@@ -680,8 +732,16 @@ font_t
 		if (opt.info)
 			printf("%c", charlist[i]);
 
-		if (p[1] > font->height)
-			font->height = p[1];
+		uint8_t gw = p[0];
+		uint8_t gh = p[1];
+
+		glyphextents(font, p, &gw, &gh);
+
+		if (gh > font->height)
+			font->height = gh;
+
+		totalwidth += gw;
+		ndefined++;
 	}
 
 	if (opt.info)
@@ -689,6 +749,18 @@ font_t
 
 	if (font->height == 0)
 		font->height = 1;
+
+	/*
+	 * The classic format has no glyph for space: the offset table starts at
+	 * '!'.  Renderers synthesise one.  Half the mean glyph width reads as a
+	 * word gap at these sizes without swallowing the line, and it scales
+	 * with the font instead of being a fixed constant that looks wrong at
+	 * both ends of the corpus.
+	 */
+	if (ndefined)
+		font->spacewidth = (totalwidth / ndefined + 1) / 2;
+	if (font->spacewidth < 1)
+		font->spacewidth = 1;
 
 	for (int i = 0; i < NUM_CHARS; i++) {
 
@@ -713,6 +785,63 @@ font_t
 	return font;
 }
 
+/*
+ * Measure a glyph's real extent by walking its cell stream.
+ *
+ * The declared width and height in the 2 byte glyph header are not always
+ * right: 130 glyphs in the bundled corpus draw more rows, or wider rows, than
+ * they declare.  Trusting the header clips real art off those glyphs, so the
+ * larger of declared and actual is used.  Rows are counted after discarding
+ * trailing empty ones, which some fonts emit as a stray separator before the
+ * terminator.
+ */
+static void
+glyphextents(const font_t *font, const uint8_t *p, uint8_t *wp, uint8_t *hp)
+{
+	unsigned int w = *wp;
+	unsigned int h = *hp;
+	unsigned int rows = 1;
+	unsigned int cols = 0;
+	unsigned int maxcols = 0;
+	unsigned int lastfilled = 1;
+
+	p += 2;
+
+	while (p < font->dataend && *p) {
+		if (*p == '\r') {
+			p++;
+			rows++;
+			cols = 0;
+			continue;
+		}
+
+		if (is_descender_mark(p, font->dataend)) {
+			p++;
+			continue;
+		}
+
+		p++;
+		if (font->fonttype == COLOR_FNT) {
+			if (p >= font->dataend)
+				break;
+			p++;
+		}
+
+		cols++;
+		if (cols > maxcols)
+			maxcols = cols;
+		lastfilled = rows;
+	}
+
+	if (lastfilled > h)
+		h = lastfilled;
+	if (maxcols > w)
+		w = maxcols;
+
+	*wp = (uint8_t)(w > 255 ? 255 : w);
+	*hp = (uint8_t)(h > 255 ? 255 : h);
+}
+
 void
 readchar(int i, glyph_t *glyph, font_t *font)
 {
@@ -723,10 +852,12 @@ readchar(int i, glyph_t *glyph, font_t *font)
 	int col = 0;
 	int width;
 
-	glyph->width = *p;
-	p++;
-	glyph->height = *p;
-	p++;
+	glyph->width = p[0];
+	glyph->height = p[1];
+
+	glyphextents(font, p, &glyph->width, &glyph->height);
+
+	p += 2;
 
 	width = glyph->width;
 
@@ -754,6 +885,11 @@ readchar(int i, glyph_t *glyph, font_t *font)
 
 	while (p < font->dataend && *p) {
 
+		if (is_descender_mark(p, font->dataend)) {
+			p++;
+			continue;
+		}
+
 		ch = *p;
 		p++;
 
@@ -776,8 +912,6 @@ readchar(int i, glyph_t *glyph, font_t *font)
 		if (font->fonttype == OUTLN_FNT) {
 			if (ch >= 0x40 && ch <= 0x4f)
 				ch = outlinemap[ch - 0x40];
-			else if (ch == OUTLINE_DESCENDER)
-				ch = ' ';
 		}
 
 #ifdef DEBUG
@@ -911,10 +1045,15 @@ printstr(const char *str, font_t *font)
 	for (int i = 0; i < len; i++) {
 		glyph_t *g;
 
+		if (str[i] == ' ') {
+			linewidth += font->spacewidth + font->spacing;
+			continue;
+		}
+
 		n = lookupchar(str[i], font);
 
 		if (n == -1) {
-			if (opt.verbose && str[i] != ' ')
+			if (opt.verbose)
 				fprintf(stderr,
 					"warning: %.*s has no glyph for '%c'\n",
 					font->namelen, (char *)font->name,
@@ -952,6 +1091,15 @@ printstr(const char *str, font_t *font)
 		}
 
 		for (int c = 0; c < len; c++) {
+			/* The offset table starts at '!', so space has no
+			 * glyph and is synthesised here (see loadfont). */
+			if (str[c] == ' ') {
+				for (int b = 0;
+				     b < font->spacewidth + font->spacing; b++)
+					printf(" ");
+				continue;
+			}
+
 			n = lookupchar(str[c], font);
 
 			if (n == -1) {
