@@ -60,11 +60,26 @@ $ tdfiglet -f tdfonts-2:1 hello
 
 ### Missing glyphs
 
-TheDraw fonts are frequently incomplete. Across the bundled corpus, letters are
-present in ~99.5% of fonts, but **digits in only 46%** and **punctuation in
-18%**; just 299 of 3711 sub-fonts define all 94 ASCII characters. Characters
-with no glyph are skipped. Use `-v` to be told when that happens, or `-i` to see
-a font's coverage before you commit to it.
+TheDraw fonts are frequently incomplete, and the raw coverage numbers flatter
+them. Counting glyph-table entries against counting *distinct art*, over all
+3711 sub-fonts:
+
+| | has a table entry | points at distinct art |
+|---|---:|---:|
+| uppercase | 99.4% | 99.4% |
+| lowercase | 99.5% | **7.3%** |
+| digits | 47.9% | 47.8% |
+| punctuation | 20.9% | 20.7% |
+
+Most of these are all-caps display fonts: 91.7% of sub-fonts point every
+lowercase slot at the matching uppercase glyph, so `a` really is `A`. Only 177
+sub-fonts in `fonts/` have all 26 lowercase letters drawn separately. Digits and
+punctuation are not aliased this way — what exists there is real, and the rest is
+genuinely absent.
+
+Just 299 of 3711 sub-fonts define all 94 ASCII characters. Characters with no
+glyph are skipped; use `-v` to be told when that happens, or `-i` to see a
+font's coverage before you commit to it.
 
 ## Documentation
 
