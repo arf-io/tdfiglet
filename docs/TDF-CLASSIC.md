@@ -169,6 +169,47 @@ glyph's data relative to header offset 213**.
 The sentinel `0xFFFF` means *this font has no glyph for this character*. It is
 common: only 299 of 3711 sub-fonts define all 94.
 
+**Entries may alias.** Two characters can carry the same offset, pointing at
+one glyph. This is not corruption and it is not rare — it is how the format
+expresses a caps-only display font (§2.7). A tool that counts non-`0xFFFF`
+entries is counting *table entries*, not distinct art, and will overstate a
+font's real repertoire.
+
+### 2.7 Aliasing, and why coverage counts mislead
+
+Most TheDraw fonts are all-caps headline fonts. Rather than leave lowercase
+undefined — which would make the font unusable unless the caller upcased its
+input — the editor points each lowercase slot at the corresponding uppercase
+glyph.
+
+Measured over all 3711 sub-fonts, for the 95 438 upper/lower pairs where both
+slots are defined:
+
+| | pairs | |
+|---|---:|---:|
+| Same offset — aliased in the table | 88 886 | 93.1% |
+| Different offset, byte-identical data | 65 | 0.1% |
+| Genuinely different art | 6 487 | 6.8% |
+
+**3402 of 3711 sub-fonts (91.7%) alias all 26 pairs**, 240 alias none, and 32
+alias some. Aliasing dominates; byte-copying is negligible.
+
+The effect on apparent coverage is large, and it is confined to letter case:
+
+| Group | Slots | Has a table entry | Points at distinct art |
+|---|---:|---:|---:|
+| Uppercase | 96 486 | 99.4% | 99.4% |
+| Lowercase | 96 486 | 99.5% | **7.3%** |
+| Digits | 37 110 | 47.9% | 47.8% |
+| Punctuation | 118 752 | 20.9% | 20.7% |
+
+So "lowercase is 99.5% covered" is true of the table and false of the art: in
+the overwhelming majority of these fonts, `a` *is* `A`. Digits and punctuation
+show no such gap between the two columns — what is defined there is real,
+separately drawn art, and what is missing is simply missing.
+
+Any tool reporting coverage should report the second column, or both.
+
 Space (0x20) is **not** in the table. Renderers synthesise it, typically as
 `spacing` blank columns, or as a run of blanks matching the font's height.
 
