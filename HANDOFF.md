@@ -89,6 +89,14 @@ reality-test directive forbids presenting as font coverage.
   `-n N` and `-f name:N` select one.
 - **`-v`** warns on characters the font has no glyph for.
 - **iCE colour.** Background nibbles 8-15 now emit SGR 100-107.
+- **Descenders.** `0x26` followed by `0x0D`/`0x00` is a descender mark, not a
+  character. Glyph rows below that mark used to be clipped (declared height
+  excludes them) and the mark itself used to render as a literal `&` that
+  desynchronised the colour-font byte stream. See "the descender find" below.
+- **Spaces.** `' '` has no glyph (the offset table starts at `!`), so
+  `tdfiglet 'HELLO WORLD'` used to print `HELLOWORLD`. A space is now
+  synthesised at half the font's mean glyph width.
+- **`-r`** now picks a random sub-font, not always sub-font 0.
 
 ### Bugs fixed (all five from the list below, plus two found while testing)
 
@@ -105,19 +113,58 @@ reality-test directive forbids presenting as font coverage.
    mmap. Found by fuzzing (108/400 crashes), not by reading. The offset table
    is now copied out byte-by-byte, which also fixes unaligned access.
 
+### The descender find (worth not re-deriving)
+
+Chasing why 130 glyphs draw more rows than they declare turned up an
+undocumented control byte. `0x26` in **character** position, when immediately
+followed by `0x0D` or `0x00`, is a **descender mark**: it ends the row, flags
+it as below-baseline, and carries **no attribute byte even in colour fonts**.
+
+The narrow "followed by `0x0D`/`0x00`" test matters — `0x26` is also a literal
+ampersand and 78 corpus cells use it as one. The discriminating measurement:
+parsing all 234473 corpus glyphs **with** the rule leaves zero glyphs whose row
+exceeds its declared width; **without** it, 81. A wrong rule desynchronises
+colour fonts (2 bytes/cell) and shows up immediately as over-wide rows.
+
+This is documented in `docs/TDF-CLASSIC.md` §3.2. It is not in the roysac
+notes, which mention `0x26` only as an outline-font "descender mark" — it is
+not outline-specific.
+
 ### Verification actually performed
 
 - **3711/3711** sub-fonts render: no crashes, hangs, errors, or empty output.
-- **1066/1071** colour fonts produce byte-identical output to the old binary.
-  All 5 differences are the iCE colour fix (`[94;30m` -> `[94;100m`).
+- **1058/1071** colour fonts are byte-identical to the old binary across the
+  full 94-character set. All 13 differences were classified, not assumed:
+  7 are colour-codes-only (the iCE fix, `[94;30m` -> `[94;100m`) and 6 are
+  content changes from the descender fix, all of which restore clipped art
+  (`fonts/metal.tdf` comma gains its tail; `fonts/keys.tdf` `&` stops
+  rendering a stray `&` and a shifted row).
+- Block/outline geometry checked structurally rather than by eye: across all
+  13759 glyphs of the 170 block and outline sub-fonts, max row width equals
+  declared width in 13710 cases and is never less, which is what rules out a
+  2-bytes-per-cell encoding (that would give roughly half-width rows).
 - **ASAN+UBSAN over the full real corpus**: 3711 sub-fonts, 0 failures.
+  Re-run after the descender change; still 0.
 - **ASAN+UBSAN fuzz, 1500 mutated files** (truncation, bit flips, forged
   blocksize/offset-table/type/spacing): 0 failures.
+
+- `render-all-td-figlet-fonts.sh` runs end to end and now enumerates
+  sub-fonts: a 3-file test set expanded to 19 sub-fonts, all rendering, all 19
+  outputs distinct. `--no-subfonts` restores the old file-at-a-time behaviour.
 
 Scripts kept at `$SCRATCH/sweep.sh`, `$SCRATCH/asansweep.sh`; the pre-change
 binary is at `$SCRATCH/tdfiglet.orig` for re-running the comparison, where
 `$SCRATCH` = `/tmp/claude-1000/-home-hedon-Augments-tdfiglet/1146162c-7709-43ad-8ff9-1e93dc378b3b/scratchpad`
 (session-scoped — regenerate rather than relying on it).
+
+### `render-all-td-figlet-fonts.sh` (untracked, left untracked)
+
+Now expands each `.tdf` into one render target per sub-font via `-L`, so it
+covers 3711 fonts instead of 1198 files. Added `--no-subfonts` to opt out,
+with help text and shell completions updated to match. It writes `-i` output
+to a file rather than parsing it, so the new multi-line `-i` format did not
+break it — but info files now carry type/sub-font/spacing lines they did not
+before.
 
 ### Docs written
 

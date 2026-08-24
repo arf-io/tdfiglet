@@ -211,12 +211,54 @@ Rows are **not** padded to the declared width. A row may be shorter than
 `width`; the remaining cells are transparent. Renderers pad to a rectangle of
 `width` × (font height) at load time.
 
-The declared `height` is per-glyph. The **font height** — the row count every
-glyph is padded to for a common baseline — is the maximum `height` over all
-defined glyphs in the sub-font, and must be computed in a pass before any glyph
-is rasterised.
+The declared `height` counts rows **down to the baseline**. Rows below the
+baseline — descenders — are extra, and are flagged by the descender mark
+(§3.4). The real row count of a glyph is therefore the number of rows in its
+cell stream, which is ≥ the declared `height`.
 
-### 3.2 Cell encoding by font type
+The **font height** — the row count every glyph is padded to — is the maximum
+*real* row count over all defined glyphs, and must be computed in a pass before
+any glyph is rasterised.
+
+**Verified:** across all 234 473 glyphs in the corpus, 234 339 have exactly
+`height` rows, 130 have more (descenders), and 4 have fewer (trailing blank
+rows the artist left off). No glyph has a row wider than its declared `width`.
+
+### 3.2 The descender mark
+
+Byte `0x26` in **character** position, when the byte immediately after it is a
+row separator (`0x0D`) or the glyph terminator (`0x00`), is a **descender
+mark**. It ends the row and flags it as hanging below the declared height. It
+is a control byte, not a cell, and it carries **no attribute byte even in
+colour fonts**.
+
+The narrow "followed by `0x0D` or `0x00`" test is load-bearing. `0x26` is also
+a literal ampersand, and 78 cells in the corpus use it as one. Distinguishing
+them by the following byte is what makes the parse unambiguous.
+
+**Verified:** parsing all 234 473 corpus glyphs with this rule leaves **zero**
+glyphs whose row exceeds its declared width. Parsing without it leaves 81.
+That is the discriminating measurement — a wrong rule desynchronises colour
+fonts, which consume two bytes per cell, and immediately produces over-wide
+rows.
+
+Descenders are rare but they are real art: they carry the tail of `Q`, the
+descenders of `g`, `y` and `j`, the tail of a comma, and the body of `_`. 130
+glyphs across 16 files use them. A parser that treats `0x26` as an ordinary
+character renders those glyphs with a stray `&`, and — in colour fonts — with
+every following cell shifted by one byte:
+
+```
+       parsed as a character            parsed as a descender mark
+        ┌───┐                                    ┌───┐
+        │  │&└───┘& ┌───┐                        │  │
+        │ ' │                                    └───┘
+        └───┘
+```
+
+(`fonts/keys.tdf`, glyph `&`.)
+
+### 3.3 Cell encoding by font type
 
 **Color (type 2)** — two bytes per cell:
 
@@ -245,7 +287,7 @@ colour.
 > bytes per cell in block and outline fonts, mistaking every second character
 > for an attribute, and produce shredded output rather than an obvious error.
 
-### 3.3 The `0x0D` ambiguity
+### 3.4 The `0x0D` ambiguity
 
 In colour fonts, `0x0D` is only a row separator when it appears in **character**
 position. A `0x0D` in attribute position is an ordinary attribute value
@@ -324,11 +366,9 @@ different table. Codes run `@` (0x40) through `O` (0x4F).
 | `N` | 0x4E | 199 | `╟` | reserved |
 | `O` | 0x4F | — | | hard space — glyph interior, renders blank |
 
-One code outside the `@`–`O` run also appears:
-
-| Byte | | Meaning |
-|---:|---|---|
-| 0x26 | `&` | descender mark — renders blank |
+One byte outside the `@`–`O` run also appears: `0x26`, the descender mark.
+It is not specific to outline fonts — it occurs in colour and block fonts too
+— and is specified in §3.2.
 
 *[external]* Table from roysac. **Verified here** by decoding
 `unused-fonts/tdfonts_org.tdf` with it: all 94 glyphs render as legible outlined
@@ -371,12 +411,15 @@ uses any other value, so the table above is complete for this corpus.
 4. Pass 1 — font height:
      for each glyph offset != 0xFFFF:
          reject the offset if it does not leave 2 bytes inside the data block
-         font_height = max(font_height, glyph.height)
+         walk the cell stream to count its real rows (declared height
+           excludes descenders, see 3.2)
+         font_height = max(font_height, real_rows)
 5. Pass 2 — rasterise:
      for each surviving glyph:
          allocate width x font_height cells, filled with transparent
          walk the cell stream, tracking (row, col)
            0x0D -> row++, col = 0
+           0x26 followed by 0x0D or 0x00 -> consume 1 byte, no cell
            otherwise -> consume 1 byte (block/outline) or 2 (color)
                         map through the outline table if type 0
                         write, then col++
@@ -466,6 +509,9 @@ Verification performed against this document:
 
 - 3711 of 3711 corpus sub-fonts parse and render, with no crashes, hangs, or
   empty output.
+- The descender rule holds over all 234 473 glyphs (§3.2), and glyph geometry
+  is consistent with 1 byte per cell for block and outline fonts over all
+  13 759 of their glyphs (§3.3).
 - All 3711 sub-fonts additionally render clean under AddressSanitizer and
   UndefinedBehaviorSanitizer.
 - 1500 mutated font files (truncation, bit flips, forged block sizes, forged
