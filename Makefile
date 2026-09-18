@@ -36,3 +36,15 @@ debug: $(SRC)
 clean:
 	rm -rf $(PROG) $(PROG).dSYM
 
+
+# Optional Python companion. Existing C build/install targets are unchanged.
+PYTHON ?= python3
+.PHONY: test install-tdfx
+
+test:
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest discover -s tests -v
+
+install-tdfx:
+	install -d "$(DESTDIR)$(PREFIX)/bin" "$(DESTDIR)$(PREFIX)/lib/tdfiglet/tdfuture"
+	install -m 755 tdfx "$(DESTDIR)$(PREFIX)/bin/tdfx"
+	install -m 644 tdfuture/*.py "$(DESTDIR)$(PREFIX)/lib/tdfiglet/tdfuture/"
