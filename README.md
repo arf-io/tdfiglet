@@ -90,4 +90,26 @@ font's coverage before you commit to it.
 - [docs/TDFUTURE.md](docs/TDFUTURE.md) — draft specification for a successor
   format: Unicode, truecolour and alpha, embedded metadata and per-glyph
   provenance, kerning and stacking order, animation, and raster/video output.
-  Design only; nothing in it is implemented.
+  The original draft is retained; see the implementation profile for current status.
+
+## TDFuture companion and font conversion
+
+The optional `tdfx` companion implements a tested static TDFuture codec,
+classic TDF archival conversion/restoration, FIGlet import, optional baked
+TTF/OTF conversion, and ANSI/HTML/PNG rendering. It does not replace the C
+renderer or claim to implement the draft's animation/shader pipeline.
+
+```sh
+python3 tdfx --help
+make test
+python3 tdfx convert ./fonts/brndamgx.tdf --all --rle -o ./converted
+python3 tdfx render ./converted/0000.tdfx 'HELLO' --profile ansi-truecolor
+python3 tdfx restore ./converted/manifest.json -o ./restored.tdf
+cmp ./fonts/brndamgx.tdf ./restored.tdf
+```
+
+Python 3.10+ is required for the companion, not for the existing C program.
+Only PNG and TTF/OTF conversion need optional Pillow/fontTools dependencies.
+
+- [Usage, installation and safety](docs/TDFX.md)
+- [Implemented features, wire decisions and deferred work](docs/TDFUTURE-IMPLEMENTATION.md)
